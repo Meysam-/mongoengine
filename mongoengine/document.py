@@ -328,6 +328,7 @@ class Document(six.with_metaclass(TopLevelDocumentMetaclass, BaseDocument)):
         _refs=None,
         save_condition=None,
         signal_kwargs=None,
+        session=None,
         **kwargs
     ):
         """Save the :class:`~mongoengine.Document` to the database. If the
@@ -357,6 +358,8 @@ class Document(six.with_metaclass(TopLevelDocumentMetaclass, BaseDocument)):
             Raises :class:`OperationError` if the conditions are not satisfied
         :param signal_kwargs: (optional) kwargs dictionary to be passed to
             the signal calls.
+        :param session: (optional) a
+            :class:`~pymongo.client_session.ClientSession`.
 
         .. versionchanged:: 0.5
             In existing documents it only saves changed fields using
@@ -409,10 +412,10 @@ class Document(six.with_metaclass(TopLevelDocumentMetaclass, BaseDocument)):
         try:
             # Save a new document or update an existing one
             if created:
-                object_id = self._save_create(doc, force_insert, write_concern)
+                object_id = self._save_create(doc, force_insert, write_concern, session)
             else:
                 object_id, created = self._save_update(
-                    doc, save_condition, write_concern
+                    doc, save_condition, write_concern, session
                 )
 
             if cascade is None:
@@ -456,7 +459,7 @@ class Document(six.with_metaclass(TopLevelDocumentMetaclass, BaseDocument)):
 
         return self
 
-    def _save_create(self, doc, force_insert, write_concern):
+    def _save_create(self, doc, force_insert, write_concern, session=None):
         """Save a new document.
 
         Helper method, should only be used inside save().
@@ -464,17 +467,17 @@ class Document(six.with_metaclass(TopLevelDocumentMetaclass, BaseDocument)):
         collection = self._get_collection()
         with set_write_concern(collection, write_concern) as wc_collection:
             if force_insert:
-                return wc_collection.insert_one(doc).inserted_id
+                return wc_collection.insert_one(doc, session=session).inserted_id
             # insert_one will provoke UniqueError alongside save does not
             # therefore, it need to catch and call replace_one.
             if "_id" in doc:
                 raw_object = wc_collection.find_one_and_replace(
-                    {"_id": doc["_id"]}, doc
+                    {"_id": doc["_id"]}, doc, session=session
                 )
                 if raw_object:
                     return doc["_id"]
 
-            object_id = wc_collection.insert_one(doc).inserted_id
+            object_id = wc_collection.insert_one(doc, session=session).inserted_id
 
         return object_id
 
@@ -493,7 +496,7 @@ class Document(six.with_metaclass(TopLevelDocumentMetaclass, BaseDocument)):
 
         return update_doc
 
-    def _save_update(self, doc, save_condition, write_concern):
+    def _save_update(self, doc, save_condition, write_concern, session=None):
         """Update an existing document.
 
         Helper method, should only be used inside save().
@@ -523,7 +526,7 @@ class Document(six.with_metaclass(TopLevelDocumentMetaclass, BaseDocument)):
             upsert = save_condition is None
             with set_write_concern(collection, write_concern) as wc_collection:
                 last_error = wc_collection.update_one(
-                    select_dict, update_doc, upsert=upsert
+                    select_dict, update_doc, upsert=upsert, session=session
                 ).raw_result
             if not upsert and last_error["n"] == 0:
                 raise SaveConditionError(
